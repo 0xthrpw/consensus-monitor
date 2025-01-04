@@ -1,110 +1,27 @@
 import { Bot } from "grammy";
 import { env } from "#/env.ts";
 import { gracefulExit } from 'exit-hook'
-import { sql, Kysely } from "kysely";
-import { PostgresJSDialect } from "kysely-postgres-js";
-import postgres from "postgres";
-import type { DB } from "#/dbtypes.ts";
+
+import { getDeploymentID, redeployService, updateVariable } from "./railway";
+import { evmClients } from "./clients";
+
+import { accountMeta, getClients, listMetaBase, 
+    listMetaEth, listMetaOp, listRecordsBase, 
+    listRecordsEth, listRecordsOp, lists, lSLUpdate } from "./model";
 
 const bot = new Bot(env.TG_BOT_TOKEN);
 
-export function createClient(url: string): Kysely<DB> {
-    const client = postgres(url);
+const db = getClients();
 
-    const database = new Kysely<DB>({
-        dialect: new PostgresJSDialect({
-            postgres: client,
-        }),
-    });
-    return database;
+const environmentIds: { [key: string]: string } = {
+    'prod': env.ENV_ID_PROD,
+    'usEast': env.ENV_ID_US_EAST,
+    'usWest': env.ENV_ID_US_WEST,
+    'euWest': env.ENV_ID_EU_WEST,
+    'asiaEast': env.ENV_ID_ASIA_EAST
 }
 
-const db: { [key: string]: Kysely<DB> }  = {
-    'prod': createClient(env.DB_PROD),
-    'usEast': createClient(env.DB_US_EAST), 
-    'usWest': createClient(env.DB_US_WEST),
-    'euWest': createClient(env.DB_EU),
-    'asiaEast': createClient(env.DB_ASIA)
-}
-
-async function listMetaBase(database: Kysely<DB>): Promise<number> {
-    const query = sql<string>` SELECT * FROM public.efp_list_metadata WHERE chain_id = 8453`
-    const result = await query.execute(database)
-    return result.rows.length
-}
-
-async function listMetaOp(database: Kysely<DB>): Promise<number> {
-    const query = sql<string>` SELECT * FROM public.efp_list_metadata WHERE chain_id = 10`
-    const result = await query.execute(database)
-    return result.rows.length
-}
-
-async function listMetaEth(database: Kysely<DB>): Promise<number> {
-    const query = sql<string>` SELECT * FROM public.efp_list_metadata WHERE chain_id = 1`
-    const result = await query.execute(database)
-    return result.rows.length
-}
-
-async function lists(database: Kysely<DB>): Promise<number> {
-    const query = sql<string>` SELECT * FROM public.efp_lists`
-    const result = await query.execute(database)
-    return result.rows.length
-}
-
-async function listOpEvents(database: Kysely<DB>): Promise<number> {
-    const events = sql<string>`
-        SELECT * 
-        FROM public.events 
-        WHERE events.event_name::text = 'ListOp'::text`
-    const eventsResult = await events.execute(database)
-    return eventsResult.rows.length
-}
-
-async function listRecordsBase(database: Kysely<DB>): Promise<number> {
-    const listRecords = sql<string>`
-        SELECT * 
-        FROM public.efp_list_records
-        WHERE chain_id = 8453`
-    const listRecordsResult = await listRecords.execute(database)
-    return listRecordsResult.rows.length
-}
-
-async function listRecordsOp(database: Kysely<DB>): Promise<number> {
-    const listRecords = sql<string>`
-        SELECT * 
-        FROM public.efp_list_records
-        WHERE chain_id = 10`
-    const listRecordsResult = await listRecords.execute(database)
-    return listRecordsResult.rows.length
-}
-
-async function listRecordsEth(database: Kysely<DB>): Promise<number> {
-    const listRecords = sql<string>`
-        SELECT * 
-        FROM public.efp_list_records
-        WHERE chain_id = 1`
-    const listRecordsResult = await listRecords.execute(database)
-    return listRecordsResult.rows.length
-}
-
-async function accountMeta(database: Kysely<DB>): Promise<number> {
-    const query = sql<string>`
-        SELECT * 
-        FROM public.efp_account_metadata`
-    const result = await query.execute(database)
-    return result.rows.length
-}
-
-async function lSLUpdate(database: Kysely<DB>): Promise<number> {
-    const query = sql<string>`
-        SELECT * 
-        FROM public.events 
-        WHERE event_name = 'UpdateListStorageLocation'`
-    const result = await query.execute(database)
-    return result.rows.length
-}
-
-async function analyze(functionPointer: Function): Promise<any> {
+async function analyze(functionPointer: Function, chain: keyof typeof evmClients, serviceID: string): Promise<any> {
     
     const props: { [key: string]: number } = {}
     let runningCount = 0
@@ -113,31 +30,44 @@ async function analyze(functionPointer: Function): Promise<any> {
         const count = await functionPointer(db[key]);
         props[key] = count;
         runningCount += count
+        console.log(count);
     }
     const averageCount = runningCount / Object.keys(props).length
     for(const key in props){
-        if((props[key] - averageCount)!== 0){
+        if(props[key] < averageCount){
             const message = `[DISCREPANCY] ${key} ${functionPointer.name} count: ${props[key]}`
             console.log(message)
             await bot.api.sendMessage(env.TG_CHAT_ID, message);
+
+            // lookup block number 
+            const client = evmClients[chain]()
+            const blockNumber = await client.getBlockNumber();
+            const newBlockNumber = blockNumber - 4000n;
+            const envID = environmentIds[key];
+            
+            // update service variables to reflect new block number
+            await updateVariable('START_BLOCK', newBlockNumber.toString(), serviceID, envID);
+            
+            // get deployment ID
+            const deploymentID = await getDeploymentID(serviceID, envID);
+
+            // trigger redeployment 
+            await redeployService(deploymentID);
+            await bot.api.sendMessage(env.TG_CHAT_ID, `Redeployed indexer:${chain} ${key} ${deploymentID}...`);
         }
     }
 }
 
 async function main(){
-    // await analyze(listMeta);
-    await analyze(lists);
-    // await analyze(listOpEvents);
-    await analyze(listRecordsBase);
-    await analyze(listRecordsOp);
-    await analyze(listRecordsEth);
-  
-    await analyze(listMetaBase);
-    await analyze(listMetaOp);
-    await analyze(listMetaEth);
-
-    await analyze(accountMeta);
-    await analyze(lSLUpdate);
+    await analyze(lists, '8453', env.SERVICE_PRIMARY_INDEXER_BASE);
+    await analyze(listRecordsBase, '8453', env.SERVICE_PRIMARY_INDEXER_BASE);
+    await analyze(listRecordsOp, '10', env.SERVICE_LIST_RECORDS_OP);
+    await analyze(listRecordsEth, '1', env.SERVICE_LIST_RECORDS_ETH);
+    await analyze(listMetaBase, '8453', env.SERVICE_PRIMARY_INDEXER_BASE);
+    await analyze(listMetaOp, '10', env.SERVICE_LIST_RECORDS_OP);
+    await analyze(listMetaEth, '1', env.SERVICE_LIST_RECORDS_ETH);
+    await analyze(accountMeta, '8453', env.SERVICE_PRIMARY_INDEXER_BASE);
+    await analyze(lSLUpdate, '8453', env.SERVICE_PRIMARY_INDEXER_BASE);
 }
 
 main().then(() => {
