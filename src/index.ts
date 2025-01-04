@@ -53,7 +53,7 @@ async function analyze(functionPointer: Function, chain: keyof typeof evmClients
 
             // trigger redeployment 
             await redeployService(deploymentID);
-            await bot.api.sendMessage(env.TG_CHAT_ID, `Redeployed indexer:${chain} ${key} ${deploymentID}...`);
+            await bot.api.sendMessage(env.TG_CHAT_ID, `Redeployed indexer:${chain} ${key} ${deploymentID.split('-')[0]}...`);
         }
     }
 }
