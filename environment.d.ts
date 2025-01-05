@@ -21,6 +21,7 @@ interface EnvironmentVariables {
     readonly PRIMARY_RPC_BASE: string;
     readonly PRIMARY_RPC_OP: string;
     readonly PRIMARY_RPC_ETH: string;
+    readonly RECOVERY_INTERVAL: string;
 }
 
 declare module "bun" {

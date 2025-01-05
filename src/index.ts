@@ -23,6 +23,7 @@ const environmentIds: { [key: string]: string } = {
 
 async function analyze(functionPointer: Function, chain: keyof typeof evmClients, serviceID: string): Promise<any> {
     
+    // get counts
     const props: { [key: string]: number } = {}
     let runningCount = 0
     for (const key in db) {
@@ -32,6 +33,8 @@ async function analyze(functionPointer: Function, chain: keyof typeof evmClients
         runningCount += count
         console.log(count);
     }
+    const runningJobs: string[] = []
+    // analyze
     const averageCount = runningCount / Object.keys(props).length
     for(const key in props){
         if(props[key] < averageCount){
@@ -42,7 +45,7 @@ async function analyze(functionPointer: Function, chain: keyof typeof evmClients
             // lookup block number 
             const client = evmClients[chain]()
             const blockNumber = await client.getBlockNumber();
-            const newBlockNumber = blockNumber - 4000n;
+            const newBlockNumber = blockNumber - BigInt(env.RECOVERY_INTERVAL);
             const envID = environmentIds[key];
             
             // update service variables to reflect new block number
@@ -50,6 +53,14 @@ async function analyze(functionPointer: Function, chain: keyof typeof evmClients
             
             // get deployment ID
             const deploymentID = await getDeploymentID(serviceID, envID);
+
+            if(runningJobs.includes(deploymentID)){
+                console.log('Already redeployed', deploymentID.split('-')[0]);
+                await bot.api.sendMessage(env.TG_CHAT_ID, `Skipped:${chain} ${key} ${deploymentID.split('-')[0]}...`);
+                continue;
+            }
+            // track triggered redeployments
+            runningJobs.push(deploymentID);
 
             // trigger redeployment 
             await redeployService(deploymentID);

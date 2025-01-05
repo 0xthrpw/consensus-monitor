@@ -31,6 +31,8 @@ export const env = Object.freeze({
     PRIMARY_RPC_BASE: getEnvVariable("PRIMARY_RPC_BASE"),
     PRIMARY_RPC_OP: getEnvVariable("PRIMARY_RPC_OP"),
     PRIMARY_RPC_ETH: getEnvVariable("PRIMARY_RPC_ETH"),
+
+    RECOVERY_INTERVAL: getEnvVariable("RECOVERY_INTERVAL")
 });
 
 function getEnvVariable<T extends keyof EnvironmentVariables>(name: T) {
