@@ -54,13 +54,13 @@ async function analyze(functionPointer: Function, chain: keyof typeof evmClients
             // get deployment ID
             const deploymentID = await getDeploymentID(serviceID, envID);
 
-            if(runningJobs.includes(deploymentID)){
+            if(runningJobs.includes(`${serviceID}-${envID}`)){
                 console.log('Already redeployed', deploymentID.split('-')[0]);
                 await bot.api.sendMessage(env.TG_CHAT_ID, `Skipped:${chain} ${key} ${deploymentID.split('-')[0]}...`);
                 continue;
             }
             // track triggered redeployments
-            runningJobs.push(deploymentID);
+            runningJobs.push(`${serviceID}-${envID}`);
 
             // trigger redeployment 
             await redeployService(deploymentID);
